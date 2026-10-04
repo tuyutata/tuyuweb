@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "repository": "tuyuweb",
+  "workflows": [
+    "tuyuweb.web.ci",
+    "tuyuweb.web.release"
+  ],
+  "node_tests": [
+    "scripts/ci/web/test.mjs",
+    "scripts/release/web/test.mjs",
+    "tests/app-contract.test.mjs"
+  ],
+  "checks": [
+    "repository-contracts"
+  ],
+  "tools": {
+    "node": "25.2.1",
+    "actionlint": "1.7.12",
+    "rust": null
+  },
+  "platform_forbidden_values": [
+    "macOS ARM64",
+    "macos-arm64",
+    "macos_arm64"
+  ]
+}
