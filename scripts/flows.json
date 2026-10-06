@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "product_id": "tuyuweb",
+  "entry": "scripts/build.mjs",
+  "platforms": {
+    "web": {
+      "tools": [
+        {
+          "id": "git",
+          "version": "2.54.0"
+        },
+        {
+          "id": "node",
+          "version": "25.2.1"
+        },
+        {
+          "id": "posix",
+          "version": "27.0"
+        }
+      ],
+      "locks": [
+        {
+          "ecosystem": "npm",
+          "path": "package-lock.json"
+        }
+      ],
+      "ci": {
+        "entry": ".github/workflows/tuyuweb-web-ci.yml",
+        "tools": [
+          {
+            "id": "git",
+            "version": "2.54.0"
+          },
+          {
+            "id": "node",
+            "version": "25.2.1"
+          }
+        ]
+      },
+      "release": {
+        "entry": ".github/workflows/tuyuweb-web-release.yml",
+        "tools": [
+          {
+            "id": "git",
+            "version": "2.54.0"
+          },
+          {
+            "id": "node",
+            "version": "25.2.1"
+          }
+        ]
+      }
+    }
+  }
+}
