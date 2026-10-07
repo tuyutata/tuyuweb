@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { tmpdir } from "node:os";
+import { temporaryRoot } from './build.mjs';
+const tmpdir=()=>temporaryRoot('web','tmp');
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = process.env.TUYUWEB_DIST
   ? path.resolve(process.env.TUYUWEB_DIST)
   : path.join(tmpdir(), "tuyuweb", "dist");
-if (!path.isAbsolute(dist) || dist === root || dist.startsWith(root + path.sep)) {
-  throw new Error("TUYUWEB_DIST必须是TuyuWeb源码外的绝对路径");
+if (!path.isAbsolute(dist) || !dist.startsWith(path.join(root, 'target') + path.sep)) {
+  throw new Error("TUYUWEB_DIST必须是TuyuWeb自有target内的绝对路径");
 }
 const index = path.join(dist, "client", "index.html");
 const worker = path.join(root, "worker.js");

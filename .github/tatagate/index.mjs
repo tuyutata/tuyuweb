@@ -256,6 +256,22 @@ function ignoredPrefixesFor(repository) {
   if (repository === 'tuyufactory') return ['imported/'];
   return [];
 }
+// 技术文档只属于本仓根；保留README简介，拒绝副本、链接、空文件与额外根技术文档。
+const productDocumentNames = Object.freeze(["TuyuWeb.md"]);
+export function validateProductDocuments(root) {
+  const allowed = new Set([...productDocumentNames, 'README.md']);
+  for (const name of productDocumentNames) {
+    const path = resolve(root, name), info = lstatSync(path, { throwIfNoEntry: false });
+    if (!info || !info.isFile() || info.isSymbolicLink() || !info.size || realpathSync(path) !== path) fail('所属产品根技术文档缺失或类型无效：' + name);
+  }
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!/\.md$/iu.test(entry.name)) continue;
+    if (!allowed.has(entry.name)) fail('所属产品根存在额外技术文档：' + entry.name);
+    const path = resolve(root, entry.name), info = lstatSync(path);
+    if (!info.isFile() || info.isSymbolicLink() || !info.size || realpathSync(path) !== path) fail('所属产品根文档必须是非空普通原件：' + entry.name);
+  }
+  return true;
+}
 export function assertNoProductOutputDirectories(root, repository) {
   const ignored = new Set(['.git', 'node_modules', 'vendor', 'Pods', '.pub-cache', '.gradle']);
   const forbidden = new Set(['build', 'target', '.dart_tool', '.kotlin']);
@@ -264,6 +280,11 @@ export function assertNoProductOutputDirectories(root, repository) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const path = resolve(directory, entry.name), relative = path.slice(root.length + 1);
       if (ignoredPrefixesFor(repository).some(prefix => (relative + '/').startsWith(prefix))) continue;
+      // 仅本仓根target是生成边界，检查准确目录且不递归扫描任务现场。
+      if (directory === root && entry.name === 'target') {
+        if (!entry.isDirectory() || entry.isSymbolicLink() || realpathSync(path) !== path) violations.push(relative);
+        continue;
+      }
       if (forbidden.has(entry.name)) violations.push(relative);
       if (entry.isDirectory() && !ignored.has(entry.name)) visit(path);
     }
@@ -288,8 +309,54 @@ export async function checkDependencies(root, { execute = spawnSync, report = co
 }
 
 
+// 格式识别源码只有PEM头尾文字；实际凭据必须有密钥正文。
+// 同时扫描原文、JSON解码值与任务补丁原件，不能用序列化转义隐藏真实材料。
+export function hasSecretMaterial(source) {
+  if (typeof source !== 'string') fail('机密扫描输入必须是文本');
+  const token = /AKIA[0-9A-Z]{16}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk_live_[A-Za-z0-9]{16,}/u;
+  const material = text => {
+    if (token.test(text)) return true;
+    const normalized = text.replace(/\\r\\n|\\n|\\r/gu, '\n');
+    for (const match of normalized.matchAll(/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\s+([A-Za-z0-9+/=\s]+)/gu)) {
+      if (match[1].replace(/\s/gu, '').length >= 32) return true;
+    }
+    return false;
+  };
+  if (material(source)) return true;
+  const documents = [];
+  const trimmed = source.trim();
+  if (/^(?:\{|\[|")/u.test(trimmed)) {
+    try { documents.push(JSON.parse(trimmed)); } catch { /* 非JSON正文仍已执行原文扫描。 */ }
+  }
+  const begin = '<!-- PATCH_DATA\n', end = '\nPATCH_DATA -->';
+  const start = source.indexOf(begin);
+  if (start >= 0) {
+    const stop = source.indexOf(end, start + begin.length);
+    if (stop < 0 || source.indexOf(begin, start + begin.length) >= 0) fail('门禁补丁快照结构不可解析');
+    try { documents.push(JSON.parse(source.slice(start + begin.length, stop))); }
+    catch { fail('门禁补丁快照结构不可解析'); }
+  }
+  while (documents.length) {
+    const value = documents.pop();
+    if (typeof value === 'string') {
+      if (material(value)) return true;
+      // JSON内再次序列化的字符串仍解码扫描；不能把凭据放进键名或第二层转义。
+      if (/^(?:\{|\[|")/u.test(value.trim())) {
+        try { documents.push(JSON.parse(value)); } catch { /* 非JSON源码已按原文检查。 */ }
+      }
+    } else if (value && typeof value === 'object') {
+      documents.push(...Object.keys(value), ...Object.values(value));
+    }
+  }
+  return false;
+}
+
 // 强特征扫描只返回路径；不将机密值带入回执或日志。
 export function validateSecrets(root) {
+  // 根技术文档沿用原件的完整转义扫描；其余源码继续执行原有强特征检查。
+  for (const name of productDocumentNames) {
+    if (hasSecretMaterial(readFileSync(resolve(root, name), 'utf8'))) fail('产品根文档机密扫描未通过，仅报告路径：' + name);
+  }
   const pattern = 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|sk_live_[A-Za-z0-9]{16,}';
   const result = spawnSync('/usr/bin/git', ['-C', root, 'grep','-l','-I','-E',pattern,'--','.',
     ':!test/release_manifest.test.ts', ':!test/release_manifest.test.mjs', ':!scripts/release/check/release_manifest.test.mjs'],
@@ -402,7 +469,7 @@ function platformContent(path,source) {
   catch { return source; }
 }
 
-// 所属仓合同只登记本仓平台命名闭集；不得读取私仓全产品字典作为公开仓运行依赖。
+// 平台命名闭集只来自本仓门禁合同，不读取其它产品或私有资料。
 export function validatePlatformNaming(root) {
   const values = contract.platform_forbidden_values;
   if (!Array.isArray(values) || !values.length || values.some(v => typeof v !== 'string' || !v)
@@ -510,6 +577,7 @@ export async function executeGate({ root, baseSHA, headSHA, work, actionlint, ca
     if (result.error || result.signal || result.status !== 0) fail('本仓塔塔门禁失败：' + label);
   };
   assertNoProductOutputDirectories(root, contract.repository);
+  validateProductDocuments(root);
   validateSecrets(root);
   validatePlatformNaming(root);
   await validateQuality(root, baseSHA, headSHA, contract.repository);

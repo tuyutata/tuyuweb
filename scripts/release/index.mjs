@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { remoteEnvironment as productRemoteEnvironment } from '../build.mjs';
+if(process.env.GITHUB_ACTIONS==='true'&&String(process.env.GITHUB_WORKFLOW||'').startsWith('tuyuweb.'))Object.assign(process.env,productRemoteEnvironment());
 // RELEASE_BUILD: full; CARGO_INCREMENTAL=0; 单平台目录不重复包装 web。
 
 import { execFileSync, spawnSync } from "node:child_process";
