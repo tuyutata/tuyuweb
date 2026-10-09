@@ -1,38 +1,29 @@
 #!/usr/bin/env node
 // 本产品独立拥有资源需求、工程准备与编译；公开回执仅提供验真资源，不提供执行命令。
 import {spawn} from 'node:child_process';
+import {checkFixedWork,clearFixedWork,fixedWork,withFixedWork,taskScope,trackWorkProcess,workEnvironment} from './target.mjs';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {rmSync,chmodSync,closeSync,openSync,readlinkSync,unlinkSync,copyFileSync,existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,realpathSync,symlinkSync,writeFileSync} from 'node:fs';
 import {dirname,isAbsolute,join,parse,relative,resolve,sep} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 
+const {fixtureWork,removeFixture,writeFixture,copyFixture}=process.env.NODE_TEST_CONTEXT&&process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)?await import('./target-fixtures.mjs'):{};
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 export const contract=JSON.parse(readFileSync(join(root,'scripts/flows.json'),'utf8'));
 const product=contract.product_id, prefix=product.toUpperCase();
 const inside=(base,path)=>{const r=relative(base,path);return r===''||!isAbsolute(r)&&r!=='..'&&!r.startsWith('..'+sep);};
 const fail=message=>{throw Error(product+' Build：'+message);};
-export function checkWork(work) {
- if(typeof work!=='string'||!isAbsolute(work)||resolve(work)!==work||work===parse(work).root||!inside(join(root,'target'),work)||work===join(root,'target'))fail('工作根必须是本产品target内的规范目录');
- const scope=relative(join(root,'target'),work).split(sep)[0];
- if(!['build','test'].includes(scope))fail('工作根只允许本产品target/build或target/test');
- let at=parse(work).root;for(const part of relative(at,work).split(sep)){at=join(at,part);const s=lstatSync(at);if(!s.isDirectory()||s.isSymbolicLink())fail('工作根经过链接或非目录');}return work;
-}
+export function checkWork(work) { return checkFixedWork(work); }
+
 // 产品自己拥有target工作边界；测试与独立入口也不借用调用方的全局缓存。
 export function productTarget(platform) {
  platformContract(platform);
  return join(root,'target');
 }
-export function temporaryRoot(platform=Object.keys(contract.platforms)[0],scope='test',suppliedInput=process.env.TMPDIR) {
+export function temporaryRoot(platform=Object.keys(contract.platforms)[0],scope='test') {
  if(!['test','tmp','build','ci','release','publish'].includes(scope))fail('临时目录职责无效');
- const endpoint=productTarget(platform),scopeDirectory=join(endpoint,scope==='test'?'test':'build'),supplied=suppliedInput?resolve(suppliedInput):undefined;
- const directory=supplied&&inside(scopeDirectory,supplied)?supplied:scopeDirectory;
- let at=parse(directory).root;
- for(const part of relative(at,directory).split(sep)){
-  at=join(at,part);if(!existsSync(at))mkdirSync(at,{mode:0o700});
-  const info=lstatSync(at);if(!info.isDirectory()||info.isSymbolicLink())fail('工作目录经过链接或非目录');
- }
- checkWork(directory);return directory;
+ platformContract(platform);return checkFixedWork(fixedWork(scope==='test'?'test':'build'),{create:true});
 }
 // 测试继承当前平台现场；独立执行没有任务身份时才选产品首个平台。
 export const testRoot=platform=>{
@@ -53,12 +44,7 @@ export function remoteEnvironment(environment=process.env) {
 // 展开来源根由本产品指定，调用者不识别任何产品来源名称。
 export function resourceSourceRoot(name,work){checkWork(work);if(!/^[a-z][a-z0-9_]*$/u.test(name))fail('来源名称无效');return join(work,'git-sources',name);}
 // 清理只针对当前执行拥有的工作根；工具全部退出后删除并回读，固定根本身保留。
-export function clearWork(work) {
- checkWork(work);const before=lstatSync(work);
- function writable(path){const state=lstatSync(path);if(state.isDirectory()&&!state.isSymbolicLink()){if(realpathSync(path)!==path)fail('清理目录经过链接');chmodSync(path,state.mode|0o700);for(const name of readdirSync(path))writable(join(path,name));}}
- for(const name of readdirSync(work)){const path=join(work,name);writable(path);rmSync(path,{recursive:true,force:true});}
- const after=lstatSync(work);if(before.dev!==after.dev||before.ino!==after.ino||readdirSync(work).length)fail('本轮工作根未完全清空或被替换');
-}
+export function clearWork(work) { return clearFixedWork(work); }
 
 export function platformContract(platform) {
  if(!Object.hasOwn(contract.platforms,platform))fail('平台未声明');
@@ -211,7 +197,8 @@ const executions=new AsyncLocalStorage();
 export async function runBuildProcess(file,args,env,cwd=root,{capture=false,input,accepted=[0],timeout=7200000,signal=executions.getStore()?.signal,passHost=false,streamError=false}={}) {
  signal?.throwIfAborted();
  return new Promise((ok,reject)=>{
-  const child=spawn(file,args,{cwd,env,detached:true,stdio:['pipe','pipe','pipe',...(passHost?[3]:[])]});
+  const child=spawn(file,args,{cwd,env:workEnvironment(env),detached:true,stdio:['pipe','pipe','pipe',...(passHost?[3]:[])]});
+  trackWorkProcess(child.pid);
   let stdout=[],stderr=[],bytes=0,reason,settled=false;
   const stop=()=>{try{process.kill(-child.pid,'SIGTERM');}catch(error){if(error.code!=='ESRCH')reason='无法取消产品工具进程组';}};
   let killer;
@@ -224,11 +211,13 @@ export async function runBuildProcess(file,args,env,cwd=root,{capture=false,inpu
   child.stdin.on('error',()=>{reason='产品工具输入失败';stop();});
   child.once('error',()=>{reason='产品工具无法启动';});
   child.once('close',async(code,termination)=>{
-   clearTimeout(forced);clearTimeout(killer);signal?.removeEventListener('abort',abort);
+   clearTimeout(forced);clearTimeout(killer);
    // 主进程close不代表后代退出；未退出的同组工具必须停止并确认，之后才能清理材料。
    const alive=()=>{if(!child.pid)return false;try{process.kill(-child.pid,0);return true;}catch(error){return error.code!=='ESRCH';}};
    if(alive()){reason??='产品工具退出后仍有后代';stop();for(let n=0;n<15&&alive();n++)await new Promise(r=>setTimeout(r,100));if(alive())try{process.kill(-child.pid,'SIGKILL');}catch{};for(let n=0;n<15&&alive();n++)await new Promise(r=>setTimeout(r,100));}
    if(alive()){reason='产品工具后代退出未确认，保留工作目录';const state=executions.getStore();if(state)state.unconfirmed=true;}
+   signal?.removeEventListener('abort',abort);clearTimeout(killer);
+   if(signal?.aborted)reason='产品任务已取消';
    if(settled)return;settled=true;
    if(reason||termination||!accepted.includes(code))reject(Error(reason||'产品工具执行失败'));
    else ok({stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8'),code});
@@ -262,6 +251,10 @@ function sourceDigest() {
 
 // 宿主完整Build先由调用方消费回执、安装并收尾；独立执行由本产品清空现场。
 export async function execute(platform,work,request={},options={}) {
+ checkWork(work);
+ return withFixedWork(taskScope(work),()=>executeTask(platform,work,request,options),{environment:options.environment||process.env,retain:request.resource_mode==='provided'||(options.environment||process.env).PRODUCT_HOST_FD==='3'});
+}
+async function executeTask(platform,work,request={},options={}) {
  checkWork(work);platformContract(platform);
  if(!inside(productTarget(platform),work)||work===productTarget(platform))fail('执行工作根与当前产品平台不一致');
  options.signal?.throwIfAborted();
@@ -308,6 +301,14 @@ async function completeBuild(platform,work,receipt,env) {
 
 // 模块先完成初始化，资源模块才能反向导入本文件的唯一校验；异步CLI在独立Promise中执行。
 async function runCLI(){
+ const [operation,,flag,work]=process.argv.slice(2);
+ if(['execute','resources','prepare','build'].includes(operation)&&flag==='--work'){
+  checkWork(work);
+  return withFixedWork(taskScope(work),()=>runCommand(),{environment:process.env,retain:process.env.PRODUCT_HOST_FD==='3'||process.env.PRODUCT_RESOURCE_FD==='4'});
+ }
+ return runCommand();
+}
+async function runCommand(){
  const [command,platform,option,work,...extra]=process.argv.slice(2);
  if(command==='temporary-root') {
   if(work!==undefined||extra.length)fail('临时入口参数无效');
@@ -320,6 +321,7 @@ async function runCLI(){
  } else {
 
  if(!['requirements','resources','prepare','build','execute'].includes(command)||option!=='--work'||extra.some(x=>x!=='--offline')||extra.length>1||extra.length&&!['resources','execute'].includes(command))fail('固定入口参数无效');
+ checkWork(work);
  if(command==='requirements')process.stdout.write(JSON.stringify(requirements(platform,work))+'\n');
  else{
   const cancellation=new AbortController();for(const name of ['SIGTERM','SIGINT'])process.once(name,()=>cancellation.abort());
@@ -329,8 +331,8 @@ async function runCLI(){
   if(command==='execute'){
    const {bootstrapNode}=await import('./resources.mjs');const node=await bootstrapNode(work,options);
    if(createHash('sha256').update(readFileSync(process.execPath)).digest('hex')!==createHash('sha256').update(readFileSync(node.path)).digest('hex')){
-    const environment=Object.fromEntries(['HOME','USER','LOGNAME','LANG','LC_ALL','PRODUCT_TOOL_ROOT','PRODUCT_DEPENDENCY_ROOT','PRODUCT_HOST_FD'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]));
-    result=JSON.parse((await runBuildProcess(node.path,[fileURLToPath(import.meta.url),command,platform,option,work,...extra],environment,root,{capture:true,streamError:true,input:JSON.stringify(request),signal:cancellation.signal,passHost:environment.PRODUCT_HOST_FD==='3'})).stdout);
+    const environment=Object.fromEntries(['HOME','USER','LOGNAME','LANG','LC_ALL','PRODUCT_TOOL_ROOT','PRODUCT_DEPENDENCY_ROOT','PRODUCT_HOST_FD','PRODUCT_WORK_LEASE'].filter(k=>typeof process.env[k]==='string').map(k=>[k,process.env[k]]));
+    result=JSON.parse((await runBuildProcess(node.path,[fileURLToPath(import.meta.url),command,platform,option,work,...extra],workEnvironment(environment),root,{capture:true,streamError:true,input:JSON.stringify(request),signal:cancellation.signal,passHost:environment.PRODUCT_HOST_FD==='3'})).stdout);
    }else result=await execute(platform,work,request,options);
   }else if(command==='resources')result=await (await import('./resources.mjs')).resources(platform,work,request,options);
   else result=await executions.run({signal:cancellation.signal},()=>command==='prepare'?prepare(platform,work,request,process.env):build(platform,work,request,process.env));

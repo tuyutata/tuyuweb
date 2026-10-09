@@ -107,3 +107,7 @@ jobs:
       run: node "$GITHUB_WORKSPACE/scripts/release/web/execute.mjs" workflow-step 1
     - shell: bash
       run: node "$GITHUB_WORKSPACE/scripts/release/web/execute.mjs" workflow-step 2
+    - name: 清空本产品固定构建目录
+      if: always()
+      shell: bash
+      run: node "$GITHUB_WORKSPACE/scripts/target.mjs" finish build

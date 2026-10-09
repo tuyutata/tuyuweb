@@ -14,7 +14,8 @@
     "scripts/resources.test.mjs",
     "tests/app-contract.test.mjs",
     "tests/release-candidate.test.mjs",
-    "tests/sites-worker.test.mjs"
+    "tests/sites-worker.test.mjs",
+    "scripts/target.test.mjs"
   ],
   "checks": [
     "repository-contracts"
