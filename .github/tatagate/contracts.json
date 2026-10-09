@@ -6,16 +6,15 @@
     "tuyuweb.web.release"
   ],
   "node_tests": [
-    "scripts/build-local.test.mjs",
-    "scripts/build.test.mjs",
-    "scripts/ci/web/test.mjs",
-    "scripts/flow.test.mjs",
-    "scripts/release/web/test.mjs",
-    "scripts/resources.test.mjs",
+    "scripts/build.mjs",
+    "scripts/ci/web/execute.mjs",
+    "scripts/flow.mjs",
+    "scripts/release/web/execute.mjs",
+    "scripts/resources.mjs",
     "tests/app-contract.test.mjs",
     "tests/release-candidate.test.mjs",
     "tests/sites-worker.test.mjs",
-    "scripts/target.test.mjs"
+    "scripts/target.mjs"
   ],
   "checks": [
     "repository-contracts"
@@ -34,37 +33,31 @@
   "functions": [
     {
       "function": "scripts/build-local.test",
-      "path": "scripts/build-local.test.mjs",
-      "runner": "node",
-      "target": "node"
-    },
-    {
-      "function": "scripts/build.test",
-      "path": "scripts/build.test.mjs",
+      "path": "scripts/build.mjs",
       "runner": "node",
       "target": "node"
     },
     {
       "function": "scripts/ci/web/test",
-      "path": "scripts/ci/web/test.mjs",
+      "path": "scripts/ci/web/execute.mjs",
       "runner": "node",
       "target": "node"
     },
     {
       "function": "scripts/flow.test",
-      "path": "scripts/flow.test.mjs",
+      "path": "scripts/flow.mjs",
       "runner": "node",
       "target": "node"
     },
     {
       "function": "scripts/release/web/test",
-      "path": "scripts/release/web/test.mjs",
+      "path": "scripts/release/web/execute.mjs",
       "runner": "node",
       "target": "node"
     },
     {
       "function": "scripts/resources.test",
-      "path": "scripts/resources.test.mjs",
+      "path": "scripts/resources.mjs",
       "runner": "node",
       "target": "node"
     },
@@ -83,6 +76,12 @@
     {
       "function": "tests/sites-worker.test",
       "path": "tests/sites-worker.test.mjs",
+      "runner": "node",
+      "target": "node"
+    },
+    {
+      "function": "scripts-target",
+      "path": "scripts/target.mjs",
       "runner": "node",
       "target": "node"
     }

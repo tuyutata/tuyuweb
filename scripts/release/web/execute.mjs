@@ -15,8 +15,25 @@ function requireExactRemoteJobEnvironment() {
 const workflowSteps=Object.freeze({"0":{"shell":"bash","source":"node \"$GITHUB_WORKSPACE/scripts/release/web/execute.mjs\" validate-inputs"},"1":{"shell":"bash","source":"node $GITHUB_WORKSPACE/scripts/release/index.mjs build-release"},"2":{"shell":"bash","source":"node $GITHUB_WORKSPACE/scripts/release/index.mjs publish-release"}});
 function runExactWorkflowStep(index){requireExactRemoteJobEnvironment();if(!/^(?:0|[1-9][0-9]*)$/.test(String(index||''))||!Object.hasOwn(workflowSteps,String(index)))throw new Error('准确远端Job阶段无效');const step=workflowSteps[String(index)];const command=step.shell==='pwsh'?'pwsh':(process.platform==='win32'?'bash':'/bin/bash');const args=step.shell==='pwsh'?['-NoLogo','-NoProfile','-NonInteractive','-Command',step.source]:['--noprofile','--norc','-e','-o','pipefail','-c',step.source];const result=runExactProcess(command,args,{cwd:process.cwd(),env:process.env,stdio:'inherit'});if(result.error)throw new Error('准确远端Job阶段无法启动');if(result.status!==0)process.exitCode=Number.isInteger(result.status)?result.status:1;}
 
+if (!(process.env.NODE_TEST_CONTEXT && process.argv.length === 2) && process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL((await import('node:path')).resolve(process.argv[1])).href) {
 requireExactRemoteJobEnvironment();
 validateCandidate();
 if(process.argv[2]==='validate-inputs') process.exit(0);
 if(process.argv[2]!=='workflow-step')throw new Error('准确Release Job只接受workflow-step');
 runExactWorkflowStep(process.argv[3]);
+}
+
+// 正式实现结束；仅直接使用 node --test 执行本文件时注册以下回归。
+if (process.env.NODE_TEST_CONTEXT && process.argv.length === 2 && !process.execArgv.some(value=>/^(?:-e|--eval(?:=|$)|--input-type(?:=|$))/u.test(value)) && process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL((await import('node:path')).resolve(process.argv[1])).href) {
+const {default:assert} = await import('node:assert/strict');
+const { readFileSync } = await import('node:fs');
+const {default:test} = await import('node:test');
+
+test('tuyuweb.web.release的web远端Job物理独立', () => {
+  const source = readFileSync(new URL('./execute.mjs', import.meta.url), 'utf8');
+  assert.ok(source.includes('{"pipeline":"tuyuweb.web.release","job":"web"}'));
+  assert.match(source, /function runExactWorkflowStep\(index\)/u);
+  assert.match(source, /function requireExactRemoteJobEnvironment\(\)/u);
+});
+
+}

@@ -2,7 +2,7 @@
 import {withFixedWork} from '../../target.mjs';
 import {remoteStep,fixedWork} from '../../target.mjs';
 import { remoteEnvironment as productRemoteEnvironment } from '../../build.mjs';
-if(process.env.GITHUB_ACTIONS==='true'&&String(process.env.GITHUB_WORKFLOW||'').startsWith('tuyuweb.'))Object.assign(process.env,productRemoteEnvironment());
+if(!(process.env.NODE_TEST_CONTEXT && process.argv.length === 2)&&process.env.GITHUB_ACTIONS==='true'&&String(process.env.GITHUB_WORKFLOW||'').startsWith('tuyuweb.'))Object.assign(process.env,productRemoteEnvironment());
 import { spawnSync as runExactProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -487,9 +487,24 @@ async function mainTask() {
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : '';
-if (invokedPath === import.meta.url) {
+if (!(process.env.NODE_TEST_CONTEXT && process.argv.length === 2) && invokedPath === import.meta.url) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
+}
+
+// 正式实现结束；仅直接使用 node --test 执行本文件时注册以下回归。
+if (process.env.NODE_TEST_CONTEXT && process.argv.length === 2 && !process.execArgv.some(value=>/^(?:-e|--eval(?:=|$)|--input-type(?:=|$))/u.test(value)) && process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL((await import('node:path')).resolve(process.argv[1])).href) {
+const {default:assert} = await import('node:assert/strict');
+const { readFileSync } = await import('node:fs');
+const {default:test} = await import('node:test');
+
+test('tuyuweb.web.ci的web远端Job物理独立', () => {
+  const source = readFileSync(new URL('./execute.mjs', import.meta.url), 'utf8');
+  assert.ok(source.includes('{"pipeline":"tuyuweb.web.ci","job":"web"}'));
+  assert.match(source, /function runExactWorkflowStep\(index\)/u);
+  assert.match(source, /function requireExactRemoteJobEnvironment\(\)/u);
+});
+
 }

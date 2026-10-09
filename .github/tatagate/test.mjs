@@ -347,14 +347,16 @@ test('官方补丁只处理准确原上下文，未使用补丁和工具声明�
 // 用真实门禁函数检查登记与执行回执；这些用例在整项实现后统一运行。
 test('本仓Git测试集合不得漏项、增项、重复或混入门禁自身', async () => {
   const { validateNodeInventory } = await import('./index.mjs');
-  const paths = ['scripts/build.mjs', 'scripts/build.test.mjs', 'test/api.spec.mjs', '.github/tatagate/test.mjs'];
-  const registered = ['scripts/build.test.mjs', 'test/api.spec.mjs'];
-  assert.deepEqual(validateNodeInventory(paths, registered), registered);
+  const paths = ['scripts/build.mjs', 'test/helper.test.mjs', 'test/api.spec.mjs', '.github/tatagate/test.mjs'];
+  const registered = ['scripts/build.mjs', 'test/helper.test.mjs', 'test/api.spec.mjs'];
+  const inventory=(paths,registered)=>validateNodeInventory(paths,registered,undefined,['scripts/build.mjs']);
+  assert.deepEqual(inventory(paths, registered), [...registered].sort());
   for (const listed of [registered.slice(1), [...registered, 'missing.test.mjs'], [...registered, registered[0]], []]) {
-    assert.throws(() => validateNodeInventory(paths, listed));
+    assert.throws(() => inventory(paths, listed));
   }
-  assert.throws(() => validateNodeInventory([...paths, 'scripts/new.test.mjs'], registered));
-  assert.throws(() => validateNodeInventory([...paths, paths[0]], registered));
+  assert.throws(() => inventory([...paths, 'scripts/new.test.mjs'], registered));
+  assert.throws(() => inventory([...paths, paths[0]], registered));
+  assert.throws(()=>validateNodeInventory([...paths,'scripts/new.mjs'],registered,undefined,['scripts/build.mjs','scripts/new.mjs']));
 });
 test('成功退出但零用例、失败、取消或跳过不能作为完整测试回执', async () => {
   const { successfulTestSummary } = await import('./index.mjs');
