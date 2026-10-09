@@ -51,28 +51,17 @@ test('Pallet不得错指、为空或重复',()=>{
   }
   assert.throws(()=>validatePalletRegistry(chain+chain));
 });
-test('公开链真源只读准确SHA，拒绝网络、重定向、超限及伪造坐标',async()=>{
-  const sha='a'.repeat(40);
-  const reference={ref:'refs/heads/main',object:{type:'commit',sha,url:'https://api.github.com/repos/crcfrcn/citizenchain/git/commits/'+sha}};
-  assert.equal(await readPublicChain(null,null,async(url,options)=>{
-    assert.equal(url,'https://api.github.com/repos/crcfrcn/citizenchain/git/ref/heads/main');
-    assert.equal(options.redirect,'error'); assert.equal(options.credentials,'omit');
-    assert.equal(options.headers.Authorization,undefined);
-    return new Response(JSON.stringify(reference));
-  }),sha);
-  assert.equal(await readPublicChain('runtime/src/lib.rs',sha,async()=>new Response('source')),'source');
-  for (const request of [
-    async()=>{throw new Error('private response forbidden');},
-    async()=>new Response('',{status:302}), async()=>new Response('',{status:404}),
-    async()=>new Response(Buffer.alloc(2*1024*1024+1)),
-    async()=>new Response(new Uint8Array([255])),
-  ]) await assert.rejects(readPublicChain('runtime/src/lib.rs',sha,request),/准确提交真源读取失败/u);
-  for (const value of [
-    {...reference,ref:'refs/heads/other'}, {...reference,object:{...reference.object,sha:'main'}},
-    {...reference,object:{...reference.object,type:'tag'}},
-    {...reference,object:{...reference.object,url:'https://example.org/commit'}},
-  ]) await assert.rejects(readPublicChain(null,null,async()=>new Response(JSON.stringify(value))));
-  await assert.rejects(readPublicChain('../private',sha,()=>assert.fail('非法路径禁止联网')));
+test('公开链真源只读准确SHA，拒绝main、网络、重定向、超限及伪造坐标',async()=>{
+ const sha='a'.repeat(40),path='runtime/src/lib.rs';
+ assert.equal(await readPublicChain(path,sha,async(url,options)=>{
+  assert.equal(url,'https://raw.githubusercontent.com/crcfrcn/citizenchain/'+sha+'/'+path);
+  assert.equal(options.redirect,'error');assert.equal(options.credentials,'omit');assert.equal(options.headers.Authorization,undefined);
+  return new Response('source');
+ }),'source');
+ for(const [path,sha]of [[null,null],['../private','a'.repeat(40)],['runtime/src/lib.rs','main'],['runtime/src/lib.rs','a'.repeat(39)]]){
+  await assert.rejects(readPublicChain(path,sha,()=>assert.fail('非法坐标禁止联网')));
+ }
+ for(const request of [async()=>{throw Error('synthetic network failure');},async()=>new Response('',{status:302}),async()=>new Response('',{status:404}),async()=>new Response(Buffer.alloc(2*1024**2+1)),async()=>new Response(new Uint8Array([255]))])await assert.rejects(readPublicChain(path,sha,request),/准确提交真源读取失败/u);
 });
 
 // 用隔离的合成Git提交验证门禁读取真实初始内容；不修改产品仓或调用仓库保存/推送。
@@ -108,20 +97,20 @@ test('保留源码不按每文件汉字数量判定，真实第一方临时注�
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// 推送只检查本仓提交合同；编译产物和平台服务测试仍由原产品流程实际调用。
-test('编译及平台服务验收保持所属产品流程，仓库门禁不借用生成状态', async () => {
+// 门禁完整执行本仓真实测试；需要产物的用例由所属入口准备，不读取其它轮次生成状态。
+test('编译及平台服务回归进入本仓门禁，原产品流程入口保持', async () => {
   const { readFileSync } = await import('node:fs');
   const root = new URL('../../', import.meta.url);
   const read = path => readFileSync(new URL(path, root), 'utf8');
-  const excluded = ["tests/release-candidate.test.mjs", "tests/sites-worker.test.mjs"];
-  for (const path of excluded) {
+  const required = ["tests/release-candidate.test.mjs", "tests/sites-worker.test.mjs"];
+  for (const path of required) {
     assert.ok(read(path).length > 0);
-    assert.ok(!gateContract().node_tests.includes(path));
+    assert.ok(gateContract().node_tests.includes(path));
   }
   const source = read('scripts/ci/web/execute.mjs');
   for (const script of ['test:contracts', 'test:sites', 'test:release']) assert.ok(source.includes(script));
   const packageSource = read('package.json');
-  for (const path of excluded) assert.ok(packageSource.includes(path));
+  for (const path of required) assert.ok(packageSource.includes(path));
 });
 
 // 准确坐标、首次提交、唯一无父根和带父覆盖分别验证，防止历史清理扩大强推范围。
@@ -353,4 +342,127 @@ test('官方补丁只处理准确原上下文，未使用补丁和工具声明�
     git('add', '--all');
     assert.throws(() => validatePlatformNaming(root), /禁用平台目录/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// 用真实门禁函数检查登记与执行回执；这些用例在整项实现后统一运行。
+test('本仓Git测试集合不得漏项、增项、重复或混入门禁自身', async () => {
+  const { validateNodeInventory } = await import('./index.mjs');
+  const paths = ['scripts/build.mjs', 'scripts/build.test.mjs', 'test/api.spec.mjs', '.github/tatagate/test.mjs'];
+  const registered = ['scripts/build.test.mjs', 'test/api.spec.mjs'];
+  assert.deepEqual(validateNodeInventory(paths, registered), registered);
+  for (const listed of [registered.slice(1), [...registered, 'missing.test.mjs'], [...registered, registered[0]], []]) {
+    assert.throws(() => validateNodeInventory(paths, listed));
+  }
+  assert.throws(() => validateNodeInventory([...paths, 'scripts/new.test.mjs'], registered));
+  assert.throws(() => validateNodeInventory([...paths, paths[0]], registered));
+});
+test('成功退出但零用例、失败、取消或跳过不能作为完整测试回执', async () => {
+  const { successfulTestSummary } = await import('./index.mjs');
+  const counts = { tests: 2, passed: 2, failed: 0, skipped: 0, todo: 0, cancelled: 0 };
+  assert.equal(successfulTestSummary({ success: true, counts }), true);
+  for (const change of [{ tests: 0 }, { passed: 0 }, { failed: 1 }, { skipped: 1 }, { todo: 1 }, { cancelled: 1 }]) {
+    assert.equal(Boolean(successfulTestSummary({ success: true, counts: { ...counts, ...change } })), false);
+  }
+  assert.equal(Boolean(successfulTestSummary({ success: false, counts })), false);
+  assert.equal(Boolean(successfulTestSummary({ success: true })), false);
+});
+test('资源中的注释文本与正则字面量不是第一方代码注释', async () => {
+  const { commentText, hasFirstPartyTemporaryComments } = await import('./index.mjs');
+  const source = 'const patch = "// TODO upstream\\n/* FIXME original */";\nconst literal = /\\/\\/ XXX/;\n// 正常中文实现说明\n';
+  assert.equal(hasFirstPartyTemporaryComments('scripts/resources.mjs', source), false);
+  assert.match(commentText('module.mjs', source), /正常中文实现说明/u);
+  assert.equal(hasFirstPartyTemporaryComments('module.mjs', source + '// TODO first party\n'), true);
+  assert.equal(hasFirstPartyTemporaryComments('module.rs', 'let raw = r##"// TODO raw"##;\n// 中文说明\n'), false);
+  assert.equal(hasFirstPartyTemporaryComments('module.rs', "fn bind<'a>() {} // FIXME actual\n"), true);
+});
+
+// 真实词法和消费者闭合，模板表达式中的真实注释仍参与检查。
+test('注释检查区分模板正文、模板表达式、Python文串和真实行尾注释',async()=>{
+ const {hasFirstPartyTemporaryComments}=await import('./index.mjs');
+ assert.equal(hasFirstPartyTemporaryComments('module.mjs','const value=`// TODO text ${1}`;'),false);
+ assert.equal(hasFirstPartyTemporaryComments('module.mjs','const value=`text ${(()=>{ // FIXME actual\n return 1; })()}`;'),true);
+ assert.equal(hasFirstPartyTemporaryComments('module.py','value="""# TODO text"""\nvalue=1 # FIXME actual\n'),true);
+ assert.equal(hasFirstPartyTemporaryComments('module.py','value="""# TODO text"""\n'),false);
+});
+// 使用真实Node运行器和实际门禁Reporter；不以伪造汇总对象代替最终执行回执。
+test('实际NodeReporter拒绝漏文件、零用例、跳过和失败',async()=>{
+ const [{mkdtempSync,writeFileSync,rmSync},{join},{testRoot},{spawnSync},{fileURLToPath}]=await Promise.all([import('node:fs'),import('node:path'),import('../../scripts/build.mjs'),import('node:child_process'),import('node:url')]);
+ const work=mkdtempSync(join(testRoot(),'gate-reporter-')),file=join(work,'case.test.mjs'),reporter=fileURLToPath(new URL('./index.mjs',import.meta.url));
+ try{
+  for(const [body,extra,success]of [
+   ['import test from "node:test";test("正常夹具",()=>{});',[],true],
+   ['export const noTests=true;',[],false],
+   ['import test from "node:test";test.skip("跳过夹具",()=>{});',[],false],
+   ['import test from "node:test";test("失败夹具",()=>{throw Error("synthetic failure")});',[],false],
+   ['import test from "node:test";test("漏项夹具",()=>{});',[join(work,'missing.test.mjs')],false],
+  ]){
+   // 子Node必须是独立运行器；保留产品工具输入，只移除父运行器的内部测试上下文。
+   const childEnvironment={...process.env,TATAGATE_NODE_TESTS:JSON.stringify([file,...extra])};delete childEnvironment.NODE_TEST_CONTEXT;
+   writeFileSync(file,body);const result=spawnSync(process.execPath,['--test','--test-reporter='+reporter,file],{env:childEnvironment,encoding:'utf8',timeout:30000,maxBuffer:2*1024**2});
+   assert.equal(result.error,undefined);assert.equal(result.signal,null);assert.equal(result.status===0,success,result.stdout+result.stderr);
+  }
+ }finally{rmSync(work,{recursive:true,force:true});}
+});
+
+test('实际语言回执拒绝零用例、跳过、失败及不完整终态',async()=>{
+ const {validateLanguageResult}=await import('./index.mjs');
+ const vitest={success:true,numTotalTests:2,numPassedTests:2,numFailedTests:0,numPendingTests:0,numTodoTests:0};assert.equal(validateLanguageResult('vitest',JSON.stringify(vitest)),true);
+ for(const change of [{numTotalTests:0,numPassedTests:0},{numPassedTests:1},{numPendingTests:1},{success:false}])assert.throws(()=>validateLanguageResult('vitest',JSON.stringify({...vitest,...change})));
+ const flutter=JSON.stringify({type:'testDone',result:'success',skipped:false,hidden:false})+'\n'+JSON.stringify({type:'done',success:true});assert.equal(validateLanguageResult('flutter',flutter),true);
+ for(const invalid of ['',JSON.stringify({type:'done',success:true}),flutter.replace('"skipped":false','"skipped":true'),flutter.replace('"success":true','"success":false')])assert.throws(()=>validateLanguageResult('flutter',invalid));
+ assert.equal(validateLanguageResult('cargo','test result: ok. 2 passed; 0 failed; 0 ignored;'),true);
+ for(const invalid of ['', 'test result: ok. 0 passed; 0 failed; 0 ignored;', 'test result: ok. 2 passed; 0 failed; 1 ignored;'])assert.throws(()=>validateLanguageResult('cargo',invalid));
+});
+
+test('代码变化必须同步所属文档与非空回归差异',async()=>{
+ const {validateChangeEvidence}=await import('./index.mjs');
+ assert.equal(validateChangeEvidence(['src/main.mjs','Owned.md','scripts/main.test.mjs'],['Owned.md']),true);
+ assert.equal(validateChangeEvidence(['Owned.md'],['Owned.md']),true);
+ for(const paths of [['src/main.mjs'],['src/main.mjs','Owned.md'],['src/main.mjs','Foreign.md','scripts/main.test.mjs']])assert.throws(()=>validateChangeEvidence(paths,['Owned.md']));
+ assert.throws(()=>validateChangeEvidence(['src/main.mjs','Owned.md','scripts/main.test.mjs'],['Owned.md'],{changed:path=>path!=='Owned.md'}));
+});
+
+// 调用真实结果核验接口；合成协议事件仅验证核验器，不能作为产品功能通过证据。
+test('功能映射必须闭合，拒绝遗漏类型、重复来源和路径越界',async()=>{
+ const {validateFunctionalContract,gateContract}=await import('./index.mjs');const list=structuredClone(gateContract().functions);
+ assert.equal(validateFunctionalContract(list),true);
+ for(const invalid of [[],[...list,list[0]],list.map((item,index)=>index?item:{...item,path:'../foreign.test.mjs'}),list.map((item,index)=>index?item:{...item,target:'/foreign/Cargo.toml'}),list.map((item,index)=>index?item:{...item,runner:'skip'}),list.map((item,index)=>index?item:{...item,unknown:true})])assert.throws(()=>validateFunctionalContract(invalid));
+ const value=structuredClone(gateContract());value.functions=value.functions.filter(item=>item.path!==value.node_tests[0]);assert.throws(()=>gateContract(value));
+});
+test('Vitest必须逐一完成本仓具名文件，错路径、漏跑和重复结果均拒绝',async()=>{
+ const {functionalFiles}=await import('./index.mjs');const root='/owned/source',paths=['test/one.test.ts','test/two.test.ts'];
+ const suite=name=>({name:root+'/'+name,assertionResults:[{status:'passed'}]}),value={success:true,numTotalTests:2,numPassedTests:2,numFailedTests:0,numPendingTests:0,numTodoTests:0,testResults:paths.map(suite)};
+ assert.deepEqual(functionalFiles('vitest',JSON.stringify(value),paths,[root]),paths.map(path=>({path,tests:1})));
+ for(const change of [{testResults:[suite(paths[0])]},{testResults:[suite(paths[0]),suite(paths[0])]},{testResults:[suite(paths[0]),{...suite(paths[1]),name:'/foreign/'+paths[1]}]},{testResults:[suite(paths[0]),{...suite(paths[1]),assertionResults:[]}]},{testResults:[suite(paths[0]),{...suite(paths[1]),assertionResults:[{status:'skipped'}]}]}])assert.throws(()=>functionalFiles('vitest',JSON.stringify({...value,...change}),paths,[root]));
+});
+test('Flutter加载事件不能代替实际用例，每个本仓套件均需成功',async()=>{
+ const {functionalFiles}=await import('./index.mjs');const path='test/feature_test.dart',events=[{type:'suite',suite:{id:1,path:'/owned/source/'+path}},{type:'testStart',test:{id:1,suiteID:1,name:'真实协议夹具',hidden:false}},{type:'testDone',testID:1,hidden:false,result:'success',skipped:false},{type:'done',success:true}];
+ const text=value=>value.map(row=>JSON.stringify(row)).join('\n');
+ assert.deepEqual(functionalFiles('flutter',text(events),[path],['/owned/source']),[{path,tests:1}]);
+ for(const value of [events.filter(item=>item.type!=='testDone'),events.map(item=>item.type==='testDone'?{...item,skipped:true}:item),events.map(item=>item.type==='suite'?{...item,suite:{...item.suite,path:'/foreign/'+path}}:item),[events[0],events[1],events[2],events[2],events[3]]])assert.throws(()=>functionalFiles('flutter',text(value),[path],['/owned/source']));
+ assert.throws(()=>functionalFiles('flutter',text(events),[path,'test/missing_test.dart'],['/owned/source']));
+});
+test('Rust功能结果必须属于准确包，完整摘要不等于具名用例执行',async()=>{
+ const {functionalRustCases}=await import('./index.mjs'),items=[{path:'src/auth.rs',package:'owned-package',cases:['reject_expired']},{path:'tests/boundary.rs',package:'owned-package',cases:['reject_foreign']}];
+ const value='test auth::reject_expired ... ok\ntest reject_foreign ... ok\ntest result: ok. 2 passed; 0 failed; 0 ignored;';
+ assert.deepEqual(functionalRustCases(value,items),items.map(item=>({path:item.path,cases:item.cases})));
+ for(const invalid of [value.replace('test reject_foreign ... ok\n',''),value.replace('0 ignored','1 ignored'),value.replace('2 passed','0 passed')])assert.throws(()=>functionalRustCases(invalid,items));
+ assert.throws(()=>functionalRustCases(value,[items[0],{...items[1],package:'foreign-package'}]));
+ assert.throws(()=>functionalRustCases(value,[items[0],{...items[1],cases:['reject_expired']} ]));
+});
+
+// 固定协调参数不承载产品产物；目录身份及空状态必须真实验证。
+test('门禁请求协调目录拒绝相对、源码和无效目录',async()=>{
+ const {validateGateRequestWork}=await import('./index.mjs');
+ assert.throws(()=>validateGateRequestWork('/owned/source','relative/work'));
+ assert.throws(()=>validateGateRequestWork('/owned/source','/nonexistent/owned/gate-work'));
+});
+
+// 回读本仓实际已跟踪测试来源；完整映射不可空跑、漏登记或混入不存在的入口。
+test('本仓真实功能源码清单与登记准确闭合',async()=>{
+ const [{validateFunctionalInventory},{fileURLToPath}]=await Promise.all([import('./index.mjs'),import('node:url')]);
+ const root=fileURLToPath(new URL('../../',import.meta.url)).replace(/\/$/u,'');
+ assert.equal(validateFunctionalInventory(root).length,gateContract().functions.length);
+ assert.throws(()=>validateFunctionalInventory(root,gateContract().functions.slice(1)),/本仓功能测试存在遗漏/u);
+ assert.throws(()=>validateFunctionalInventory(root,[...gateContract().functions,{function:'不存在的入口',path:'missing.test.mjs',runner:'node',target:'.'}]),/本仓功能测试存在遗漏/u);
 });
