@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "repository": "tuyuweb",
+  "github_repository": "tuyutata/tuyuweb",
+  "workflows": ["release-web.yml"],
+  "checks": ["repository-contracts", "flow-isolation", "syntax"]
+}

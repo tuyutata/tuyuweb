@@ -8,11 +8,11 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/prepare-sites-build.mjs",
+    "build": "vite build && node scripts/build.mjs prepare-sites",
     "preview": "vite preview",
     "test": "npm run build && npm run test:contracts && npm run test:sites",
     "test:contracts": "node --test tests/app-contract.test.mjs",
-    "test:release": "node --test tests/release-candidate.test.mjs",
+    "test:release": "node --test .github/workflows/release-web.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {

@@ -1,0 +1,141 @@
+---
+name: tuyuweb.web
+run-name: "${{ github.workflow }} · ${{ github.run_number }}"
+'on':
+  workflow_dispatch: {}
+concurrency:
+  group: "${{ github.repository }}-web"
+  cancel-in-progress: false
+  queue: max
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: "${{ steps.version.outputs.version }}"
+      tag: "${{ steps.version.outputs.tag }}"
+      source_sha: "${{ steps.version.outputs.source_sha }}"
+      run_id: "${{ steps.version.outputs.run_id }}"
+      run_attempt: "${{ steps.version.outputs.run_attempt }}"
+      run_number: "${{ steps.version.outputs.run_number }}"
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: "${{ github.sha }}"
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      with:
+        node-version: 25.2.1
+    - id: version
+      env:
+        GH_TOKEN: "${{ github.token }}"
+      run: node .github/workflows/release-web.mjs prepare
+  flow:
+    name: 构建并固化途遇官网正式资产
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    env:
+      CI: 'true'
+      WRANGLER_SEND_METRICS: false
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: '1'
+      CARGO_INCREMENTAL: '0'
+      GH_TOKEN: "${{ github.token }}"
+      TUYU_SOURCE_SHA: "${{ github.sha }}"
+      TUYU_VERSION_TAG: "${{ needs.prepare.outputs.tag }}"
+      TUYU_SOFTWARE_VERSION: "${{ needs.prepare.outputs.version }}"
+      SOURCE_SHA: "${{ github.sha }}"
+      VERSION_TAG: "${{ needs.prepare.outputs.tag }}"
+      SOFTWARE_VERSION: "${{ needs.prepare.outputs.version }}"
+      RELEASE_VERSION: "${{ needs.prepare.outputs.version }}"
+      RELEASE_TAG: "${{ needs.prepare.outputs.tag }}"
+      PRODUCER_RUN_ID: "${{ github.run_id }}"
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: "${{ github.sha }}"
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      with:
+        node-version: 25.2.1
+    - name: 准备本目标独占现场
+      run: node .github/workflows/release-web.mjs job
+    - shell: bash
+      run: node "$GITHUB_WORKSPACE/.github/workflows/release-web.mjs" step 1
+    - id: complete
+      name: 逐件收集完整正式产物
+      run: node .github/workflows/release-web.mjs collect-produced
+    - name: 交付本次完整产物
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: release-output
+        path: "${{ steps.complete.outputs.assets }}"
+        if-no-files-found: error
+        retention-days: 7
+    needs:
+    - prepare
+  publish:
+    needs:
+    - prepare
+    - flow
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: "${{ needs.prepare.outputs.version }}"
+      RELEASE_TAG: "${{ needs.prepare.outputs.tag }}"
+      GH_TOKEN: "${{ github.token }}"
+      CI: 'true'
+      CARGO_INCREMENTAL: '0'
+      PRODUCER_RUN_ID: "${{ github.run_id }}"
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: "${{ github.sha }}"
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      with:
+        node-version: 25.2.1
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      with:
+        name: release-output
+        path: "${{ runner.temp }}/release-output"
+    - id: complete
+      name: 正式Release上传并逐件回读
+      run: node .github/workflows/release-web.mjs publish "$RUNNER_TEMP/release-output"
+  cleanup:
+    if: "${{ always() }}"
+    needs:
+    - prepare
+    - flow
+    - publish
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      contents: write
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      RELEASE_NEEDS: "${{ toJSON(needs) }}"
+      RELEASE_TAG: "${{ needs.prepare.outputs.tag }}"
+      PRODUCER_RUN_ID: "${{ github.run_id }}"
+    steps:
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      with:
+        ref: "${{ github.sha }}"
+        fetch-depth: 0
+        persist-credentials: false
+    - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+      with:
+        node-version: 25.2.1
+    - name: 按全部前置结果清理本目标同类历史
+      run: node .github/workflows/release-web.mjs finish
