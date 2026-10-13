@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "test": "npm run build && npm run test:contracts && npm run test:sites",
     "test:contracts": "node --test tests/app-contract.test.mjs",
-    "test:release": "node --test .github/workflows/release-web.mjs",
+    "test:release": "node --check scripts/publish.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs"
   },
   "dependencies": {

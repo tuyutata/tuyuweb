@@ -1,0 +1,120 @@
+name: tuyuweb.web
+'on':
+  workflow_dispatch: {}
+concurrency:
+  group: tuyuweb-web-release
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: xcode-27
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: "${{ github.sha }}"
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 25.2.1
+      - name: 调用本仓Build并建立正式Web版本
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          node --input-type=module <<'NODE'
+          import {createHash} from 'node:crypto';
+          import {execFileSync,spawnSync} from 'node:child_process';
+          import {lstatSync,mkdirSync,readFileSync,readdirSync,writeFileSync} from 'node:fs';
+          import {basename,join,relative,sep} from 'node:path';
+          import {gzipSync} from 'node:zlib';
+          import {execute} from './scripts/build.mjs';
+
+          const repo='tuyutata/tuyuweb',product='tuyuweb',platform='web';
+          const fail=message=>{throw Error('途遇官网正式版：'+message);};
+          const hash=value=>createHash('sha256').update(value).digest('hex');
+          const stable=value=>Array.isArray(value)?'['+value.map(stable).join(',')+']':value&&typeof value==='object'?'{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stable(value[key])).join(',')+'}':JSON.stringify(value);
+          const gh=(args)=>execFileSync('gh',args,{encoding:'utf8',maxBuffer:8*1024**2,env:process.env}).trim();
+          const api=path=>JSON.parse(gh(['api','repos/'+repo+'/'+path]));
+          const run=Number(process.env.GITHUB_RUN_ID),attempt=Number(process.env.GITHUB_RUN_ATTEMPT),number=Number(process.env.GITHUB_RUN_NUMBER);
+          if(process.env.GITHUB_ACTIONS!=='true'||process.env.GITHUB_REPOSITORY!==repo
+            ||process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||process.env.GITHUB_REF!=='refs/heads/main'
+            ||process.env.GITHUB_WORKFLOW_REF!==repo+'/.github/workflows/web.yml@refs/heads/main'
+            ||![run,attempt,number].every(value=>Number.isSafeInteger(value)&&value>0)
+            ||!/^[a-f0-9]{40}$/u.test(process.env.GITHUB_SHA||'')
+            ||spawnSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).stdout?.trim()!==process.env.GITHUB_SHA)fail('GitHub源码与运行身份无效');
+          const seed=JSON.parse(readFileSync('package.json','utf8')).version;
+          const ordinal=value=>{const match=/^(0|[1-9]\d*)\.(0|[1-9]\d?)\.(0|[1-9]\d?)$/u.exec(value||'');
+            if(!match)fail('版本声明无效');return BigInt(match[1])*10000n+BigInt(match[2])*100n+BigInt(match[3]);};
+          let next=ordinal(seed)+BigInt(number-1);
+          for(let page=1;page<=10000;page++){
+            const rows=api('releases?per_page=100&page='+page);
+            if(!Array.isArray(rows)||rows.length>100)fail('历史Release分页无效');
+            for(const row of rows){const match=/^tuyuweb-web-v(\d+\.\d+\.\d+)-r[1-9]\d*-a[1-9]\d*$/u.exec(row?.tag_name||'');
+              if(match){const candidate=ordinal(match[1])+1n;if(candidate>next)next=candidate;}}
+            if(rows.length<100)break;
+            if(page===10000)fail('历史Release分页超限');
+          }
+          const version=`${next/10000n}.${next/100n%100n}.${next%100n}`,sha=process.env.GITHUB_SHA;
+          const work=join(process.cwd(),'target/build/web');
+          const task=join(process.env.RUNNER_TEMP,product,platform,String(run),String(attempt));
+          mkdirSync(task,{recursive:true});
+          const collect=(base,prefix)=>{const values=[];
+            function visit(directory){for(const name of readdirSync(directory).sort()){const path=join(directory,name),info=lstatSync(path);
+              if(info.isSymbolicLink())fail('候选含链接');if(info.isDirectory())visit(path);
+              else if(info.isFile()&&info.nlink===1&&info.size>0){const relativePath=relative(base,path).split(sep).join('/');
+                if(!relativePath||relativePath.split('/').some(part=>!part||part==='.'||part==='..'))fail('候选路径越界');
+                values.push([prefix+relativePath,readFileSync(path)]);}else fail('候选包含空文件或特殊文件');}}
+            visit(base);return values;};
+          const archive=files=>{const blocks=[];for(const [name,data] of [...files].sort(([a],[b])=>a<b?-1:a>b?1:0)){
+            if(Buffer.byteLength(name)>100||data.length>128*1024**2)fail('正式成员路径或大小越界');
+            const header=Buffer.alloc(512),field=(at,size,value)=>header.write(value,at,size,'ascii');
+            field(0,100,name);field(100,8,'0000644\0');field(108,8,'0000000\0');field(116,8,'0000000\0');
+            field(124,12,data.length.toString(8).padStart(11,'0')+'\0');field(136,12,'00000000000\0');
+            header.fill(32,148,156);header[156]=48;field(257,6,'ustar\0');field(263,2,'00');
+            field(148,8,[...header].reduce((sum,byte)=>sum+byte,0).toString(8).padStart(6,'0')+'\0 ');
+            blocks.push(header,data,Buffer.alloc((512-data.length%512)%512));}blocks.push(Buffer.alloc(1024));
+            return gzipSync(Buffer.concat(blocks),{level:9,mtime:0});};
+          await execute(platform,work,{}, {consume:async result=>{
+            if(result?.completion!=='compile-only'||result.product_id!==product||result.platform!==platform
+              ||result.work!==work||result.files?.length!==0)fail('产品Build回执无效');
+            const dist=join(work,'stage/compile/client'),assets=collect(dist,'dist/');
+            if(!assets.some(([name])=>name==='dist/index.html'))fail('官网入口缺失');
+            const pkg=JSON.parse(readFileSync('package.json','utf8')),lock=JSON.parse(readFileSync('package-lock.json','utf8'));
+            pkg.version=version;lock.version=version;if(!lock.packages?.[''])fail('npm锁根声明缺失');lock.packages[''].version=version;
+            const payload=new Map([['package.json',Buffer.from(JSON.stringify(pkg)+'\n')],['package-lock.json',Buffer.from(JSON.stringify(lock)+'\n')],...assets]);
+            payload.set('dist/tuyuweb-release.json',Buffer.from(JSON.stringify({product_id:product,platform,software_version:version,git_commit_sha:sha})+'\n'));
+            const bytes=archive(payload),assetName='tuyuweb.tgz';
+            const manifest=Buffer.from(JSON.stringify({product_id:product,platform,software_version:version,
+              git_commit_sha:sha,producer_run_id:run,producer_run_attempt:attempt,assets:[{name:assetName,sha256:hash(bytes)}]},null,2)+'\n');
+            const checksums=Buffer.from(hash(bytes)+'  '+assetName+'\n'+hash(manifest)+'  release-manifest.json\n');
+            const publish=new Map([[assetName,bytes],['release-manifest.json',manifest],['SHA256SUMS',checksums]]);
+            for(const [name,data] of publish)writeFileSync(join(task,name),data,{flag:'wx',mode:0o600});
+            const tag=`tuyuweb-web-v${version}-r${run}-a${attempt}`;
+            let created=false;
+            try{
+              gh(['release','create',tag,...[...publish.keys()].map(name=>join(task,name)),'--repo',repo,'--target',sha,
+                '--title',`tuyuweb · web · ${version}`,'--notes',`Source: ${sha}\nRun: ${run} / ${attempt}`,'--draft','--latest=false']);
+              created=true;
+              const readback=api('releases/tags/'+encodeURIComponent(tag));
+              if(readback.tag_name!==tag||!readback.draft||readback.target_commitish!==sha
+                ||readback.assets?.length!==publish.size)fail('草稿Release身份无效');
+              const ref=api('git/ref/tags/'+encodeURIComponent(tag));
+              if(ref.ref!=='refs/tags/'+tag||ref.object?.sha!==sha||ref.object.type!=='commit')fail('正式Tag提交无效');
+              const download=join(task,'readback');mkdirSync(download);
+              gh(['release','download',tag,'--repo',repo,'--dir',download]);
+              for(const [name,data] of publish){const asset=readback.assets.find(value=>value.name===name);
+                if(!asset||asset.state!=='uploaded'||asset.size!==data.length||asset.digest!=='sha256:'+hash(data)
+                  ||hash(readFileSync(join(download,name)))!==hash(data))fail('正式资产回读不一致：'+name);}
+              gh(['release','edit',tag,'--repo',repo,'--draft=false']);
+              const final=api('releases/tags/'+encodeURIComponent(tag));
+              if(final.draft||final.prerelease||final.tag_name!==tag)fail('正式Release发布未确认');
+              console.log(JSON.stringify({tag,release_id:final.id,assets:[...publish.keys()]}));
+            }catch(error){
+              if(created)try{gh(['release','delete',tag,'--repo',repo,'--yes','--cleanup-tag']);}catch(cleanup){
+                throw new Error(error.message+'；本次Release撤销未确认：'+cleanup.message);}
+              throw error;
+            }
+          }});
+          NODE

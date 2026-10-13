@@ -79,7 +79,8 @@ export async function verifyRelease({platform,tag,directory}){
  const input=Object.fromEntries(names.map(name=>[name,ordinary(root,name,name===asset?8*1024**3:1024*1024)]));
  const manifest=manifestInput(input['release-manifest.json'].path);
  if(manifest.product_id!==product||manifest.platform!==platform||manifest.software_version!==point.version
-   ||manifest.producer_run_id!==point.run||!shaPattern.test(manifest.git_commit_sha||'')
+   ||manifest.producer_run_id!==point.run||manifest.producer_run_attempt!==point.attempt
+   ||!shaPattern.test(manifest.git_commit_sha||'')
    ||!Array.isArray(manifest.assets)||manifest.assets.length!==1||manifest.assets[0]?.name!==asset
    ||!digestPattern.test(manifest.assets[0]?.sha256||''))fail('正式清单身份或资产声明不符');
  const sums=readFileSync(input.SHA256SUMS.path,'utf8');
@@ -97,7 +98,7 @@ export async function verifyRelease({platform,tag,directory}){
  if(ref.ref!=='refs/tags/'+tag||ref.object?.type!=='commit'||ref.object.sha!==manifest.git_commit_sha)fail('Tag与源码提交不符');
  const run=await github('actions/runs/'+point.run);
  if(run.id!==point.run||run.run_attempt!==point.attempt||run.status!=='completed'||run.conclusion!=='success'
-   ||run.head_sha!==manifest.git_commit_sha||run.path!=='.github/workflows/release-'+platform+'.yml')fail('正式构建运行身份或结果不符');
+    ||run.head_sha!==manifest.git_commit_sha||run.path!=='.github/workflows/web.yml')fail('正式构建运行身份或结果不符');
  await latestTag(platform,tag);
  return {schema:1,product_id:product,platform,tag,source_sha:manifest.git_commit_sha,asset,sha256:assetHash,verified:true};
 }
