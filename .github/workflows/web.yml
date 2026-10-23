@@ -1,4 +1,5 @@
 name: tuyuweb.web
+run-name: tuyuweb.web·${{ github.run_number }}
 'on':
   workflow_dispatch: {}
 concurrency:
