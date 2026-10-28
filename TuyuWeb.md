@@ -230,3 +230,8 @@ GitHub接口使用普通参数和已授权令牌，返回本仓既有版本计�
 ## 外部调用入口
 
 本产品scripts/config.mjs的describeAction仅返回repository、workflow、ref、inputs，或既有本地进程命令声明；不导入构建实现、不派发GitHub请求、不处理令牌、版本或历史。控制台使用统一数据接口直接派发并只读观察准确Run；产品GitHub业务归所属既有YAML。本次自动化Run名称使用运行编号，正式构建及产物保持版本名称。已有工具和依赖复用，缺少时才按原声明准备。
+
+
+### 第4步既有回归阻塞收口
+
+原测试子进程继承独占会话，不进入旧固定target/test；收尾断言使用本作用域fs。Publish保留CLI并在同文件模拟GitHub覆盖正常和身份/摘要失败，不派发或发布。

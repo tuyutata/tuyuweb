@@ -104,9 +104,69 @@ export async function verifyRelease({platform,tag,directory}){
 }
 
 const direct=process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url);
-if(direct){
+if(direct&&!process.env.NODE_TEST_CONTEXT){
  void (async()=>{
   const args=process.argv.slice(2);if(args.length!==7||args[0]!=='verify'||args[1]!=='--platform'||args[3]!=='--tag'||args[5]!=='--directory')fail('用法：publish.mjs verify --platform 平台 --tag 正式Tag --directory 绝对资产目录');
   process.stdout.write(JSON.stringify(await verifyRelease({platform:args[2],tag:args[4],directory:args[6]}))+'\n');
  })().catch(error=>{process.stderr.write(String(error?.message||error)+'\n');process.exitCode=1;});
+}
+
+// 同文件测试仅模拟GitHub读取，绝不上传、部署或访问正式发布记录。
+if(process.env.NODE_TEST_CONTEXT && process.argv.length===2 && direct){
+ const {test}=await import('node:test'),{default:assert}=await import('node:assert/strict');
+ const {mkdtempSync,mkdirSync,writeFileSync,rmSync,symlinkSync}=await import('node:fs');
+ const {testRoot}=await import('./build.mjs');
+ function fixture(t,platform){
+  const directory=mkdtempSync(join(realpathSync(testRoot()),product+'-publish-'));
+  t.after(()=>rmSync(directory,{recursive:true,force:true}));
+  const tag=product+'-'+platform+'-v1.2.3-r17-a2',asset=assets[platform],commit='a'.repeat(40);
+  writeFileSync(join(directory,asset),'public fixture candidate');
+  const hash=name=>createHash('sha256').update(readFileSync(join(directory,name))).digest('hex');
+  const manifest={product_id:product,platform,software_version:'1.2.3',producer_run_id:17,producer_run_attempt:2,
+   git_commit_sha:commit,assets:[{name:asset,sha256:hash(asset)}]};
+  writeFileSync(join(directory,'release-manifest.json'),JSON.stringify(manifest));
+  writeFileSync(join(directory,'SHA256SUMS'),hash(asset)+'  '+asset+'\n'+hash('release-manifest.json')+'  release-manifest.json\n');
+  const names=releaseNames(asset),release={tag_name:tag,draft:false,prerelease:false,
+   assets:names.map(name=>({name,digest:'sha256:'+hash(name),size:lstatSync(join(directory,name)).size,state:'uploaded'}))};
+  const ref={ref:'refs/tags/'+tag,object:{type:'commit',sha:commit}};
+  const path=product==='tuyuweb'?'web.yml':({cloudflare:'cloudflare.yml','linux-arm':'linuxarm.yml'})[platform];
+  const run={id:17,run_attempt:2,status:'completed',conclusion:'success',head_sha:commit,path:'.github/workflows/'+path};
+  let releases=[release],calls=0;
+  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original;});
+  globalThis.fetch=async(url,options)=>{
+   calls++;assert.equal(options.redirect,'error');assert.ok(!options.method||options.method==='GET');
+   const prefix='https://api.github.com/repos/'+repository+'/';assert.ok(url.startsWith(prefix));
+   const route=url.slice(prefix.length);
+   const body=route.startsWith('releases/tags/')?release:route.startsWith('git/ref/tags/')?ref:
+    route==='actions/runs/17'?run:route==='releases?per_page=100&page=1'?releases:undefined;
+   assert.notEqual(body,undefined,'unexpected network route');return Response.json(body);
+  };
+  return {directory,tag,asset,release,ref,run,request:{directory,tag,platform},
+   later:()=>{releases=[...releases,{...release,tag_name:product+'-'+platform+'-v1.2.4-r18-a1'}];},calls:()=>calls};
+ }
+ for(const platform of Object.keys(assets)){
+  test('正式发布校验完整通过：'+platform,async t=>{
+   const f=fixture(t,platform),result=await verifyRelease(f.request);assert.equal(result.verified,true);
+   assert.equal(result.product_id,product);assert.equal(result.platform,platform);assert.equal(f.calls(),4);
+  });
+  for(const [kind,expected]of [['digest',/摘要不一致/u],['commit',/Tag与源码提交不符/u],['run',/运行身份或结果不符/u],['latest',/不是本平台最新/u],['extra',/资产集合不匹配/u],['link',/准确普通文件/u]]){
+   test('正式发布拒绝'+kind+'：'+platform,async t=>{
+    const f=fixture(t,platform);
+    if(kind==='digest')writeFileSync(join(f.directory,f.asset),'changed');
+    if(kind==='commit')f.ref.object.sha='b'.repeat(40);
+    if(kind==='run')f.run.run_attempt=3;
+    if(kind==='latest')f.later();
+    if(kind==='extra')writeFileSync(join(f.directory,'extra'),'unexpected');
+    if(kind==='link'){rmSync(join(f.directory,f.asset));symlinkSync('release-manifest.json',join(f.directory,f.asset));}
+    await assert.rejects(verifyRelease(f.request),expected);
+    if(['digest','extra','link'].includes(kind))assert.equal(f.calls(),0);
+   });
+  }
+ }
+ test('发布坐标错误在任何网络读取前拒绝',async()=>{
+  assert.throws(()=>coordinate('unknown','bad'),/平台未声明/u);
+  const platform=Object.keys(assets)[0];
+  for(const tag of ['other-v1.0.0',product+'-'+platform+'-v01.0.0-r1-a1',product+'-'+platform+'-v1.0.0-r0-a1'])
+   await assert.rejects(verifyRelease({platform,tag,directory:'/missing'}),/Tag|坐标/u);
+ });
 }

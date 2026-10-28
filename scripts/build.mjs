@@ -2216,7 +2216,7 @@ test('第二个真实进程不能领取活跃固定根或清理前一任务',asy
  await withFixedWork('test',async work=>{
   fs.writeFileSync(join(work,'sentinel'),'owned');
   const module=join(import.meta.dirname,'build.mjs');
-  assert.throws(()=>execFileSync(process.execPath,['--input-type=module','-e','import {withFixedWork} from '+JSON.stringify(module)+'; await withFixedWork("test",()=>{});'],{env:{PATH:process.env.PATH},stdio:['ignore','pipe','pipe']}),/活跃任务/);
+  assert.throws(()=>execFileSync(process.execPath,['--input-type=module','-e','import {withFixedWork} from '+JSON.stringify(module)+'; await withFixedWork("test",()=>{});'],{env:{PATH:process.env.PATH,NODE_TEST_CONTEXT:process.env.NODE_TEST_CONTEXT,PRODUCT_TEST_SESSION:process.env.PRODUCT_TEST_SESSION},stdio:['ignore','pipe','pipe']}),/活跃任务/);
   assert.equal(fs.readFileSync(join(work,'sentinel'),'utf8'),'owned');
  });isEmpty();
 });
@@ -2241,7 +2241,7 @@ test('实际任务被强制终止后下一轮在同一固定根恢复并清场',
  const {spawn}=await import('node:child_process');
  const module=join(import.meta.dirname,'build.mjs');
  const code='import {withFixedWork} from '+JSON.stringify(module)+';import fs from "node:fs";await withFixedWork("test",async work=>{fs.writeFileSync(work+"/interrupted","partial");process.stdout.write("ready");await new Promise(()=>{setInterval(()=>{},1000);});});';
- const child=spawn(process.execPath,['--input-type=module','-e',code],{env:{PATH:process.env.PATH},stdio:['ignore','pipe','pipe']});
+ const child=spawn(process.execPath,['--input-type=module','-e',code],{env:{PATH:process.env.PATH,NODE_TEST_CONTEXT:process.env.NODE_TEST_CONTEXT,PRODUCT_TEST_SESSION:process.env.PRODUCT_TEST_SESSION},stdio:['ignore','pipe','pipe']});
  const finished=new Promise(resolve=>child.once('close',(code,signal)=>resolve({code,signal})));
  try{await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('任务领取超时')),5000);child.once('error',reject);child.stdout.once('data',()=>{clearTimeout(timer);resolve();});});child.kill('SIGKILL');assert.equal((await finished).signal,'SIGKILL');
   assert.equal(fs.readFileSync(join(fixedWork('test'),'interrupted'),'utf8'),'partial');
@@ -2254,6 +2254,7 @@ test('实际任务被强制终止后下一轮在同一固定根恢复并清场',
 // 本产品收尾拒绝异任务与仍存活的资源后代。
 if(process.env.NODE_TEST_CONTEXT&&process.argv.length===2&&process.argv[1]===import.meta.filename){
  const {test}=await import('node:test'),{default:assert}=await import('node:assert/strict'),{spawn}=await import('node:child_process');
+ const {default:fs}=await import('node:fs');
  test('收尾必须匹配本轮编号并等待资源后代退出',async()=>{
   const work=fixedWork('test');await withFixedWork('test',()=>withFixedWork('test',async()=>{fs.writeFileSync(join(work,'keep'),'owned');},{run_id:'owned-run'}),{retain:true});
   assert.throws(()=>finishFixedWork(work,{run_id:'other-run'}),/任务编号/);assert.equal(fs.readFileSync(join(work,'keep'),'utf8'),'owned');
