@@ -265,7 +265,7 @@ const osPlatform=platform=>platform.includes('linux-')?'linux':platform.replace(
 export function lockedSources() {
  const source=sourceRoot(),path=join(source,'pubspec.yaml');if(!existsSync(path))return [];
  const manifest=readFileSync(path,'utf8'),lock=readFileSync(join(source,'pubspec.lock'),'utf8'),result=[];
- for(const name of ['citizen_sdk','tatachat_sdk']) {
+ for(const name of ['citizen_sdk']) {
   const block=text=>[...text.matchAll(new RegExp('^  '+name+':\\r?\\n(?: {4,}[^\\n]*\\n|[ \\t]*\\n)+','gm'))];
   const a=block(manifest),b=block(lock);if(!a.length)continue;
   if(a.length!==1||b.length!==1)fail('Git来源记录不唯一');
@@ -282,14 +282,11 @@ export function requirements(platform,work) {
  for(const source of sources) {
   const packageRoot=join(work,'git-sources',source.name);
   if(existsSync(packageRoot)) {
-   const path=source.name==='citizen_sdk'?'Cargo.lock':'native/Cargo.lock';
-   locks.push({ecosystem:'cargo',path,source_package:source.name});
-   if(source.name==='citizen_sdk') {
-    const lock=JSON.parse(readFileSync(join(packageRoot,'scripts/dependencies.lock.json'),'utf8'));
-    const p=nativePlatform(platform);
-    const entries=[['zxing-cpp',lock.environment['zxing-cpp']],...((p==='LinuxARM'||p==='LinuxAMD')?Object.entries(lock.native.sources):p==='Windows'?[['sqlite',lock.native.sources.sqlite]]:[])];
-    for(const [name,value]of entries)archives.push({ecosystem:'native',name,...value,group:'sdk-native'});
-   }
+   locks.push({ecosystem:'cargo',path:'Cargo.lock',source_package:source.name});
+   const lock=JSON.parse(readFileSync(join(packageRoot,'scripts/dependencies.lock.json'),'utf8'));
+   const p=nativePlatform(platform);
+   const entries=[['zxing-cpp',lock.environment['zxing-cpp']],...((p==='LinuxARM'||p==='LinuxAMD')?Object.entries(lock.native.sources):p==='Windows'?[['sqlite',lock.native.sources.sqlite]]:[])];
+   for(const [name,value]of entries)archives.push({ecosystem:'native',name,...value,group:'sdk-native'});
   }
  }
  // 原生源归档坐标归本产品已有声明；准备后才提出展开源码的Cargo锁。
