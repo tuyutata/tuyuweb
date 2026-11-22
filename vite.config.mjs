@@ -1,3 +1,5 @@
+// 配置官网React构建、源码外输出目录和开发服务器。
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { tmpdir } from "node:os";

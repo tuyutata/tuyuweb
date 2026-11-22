@@ -1,4 +1,5 @@
-// 本产品配置需求的公开入口；只登记名称、类型和规则，不保存配置值。
+// 声明途遇官网的公开配置和Web自动化工作流。
+
 export const manifest=Object.freeze({
   "schema": 1,
   "product_id": "tuyuweb",

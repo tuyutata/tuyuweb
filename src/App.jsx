@@ -1,3 +1,5 @@
+// 展示途遇官网品牌、旅行场景与平台入口，处理导航展开和页面区块交互。
+
 import { useState } from "react";
 import {
   AndroidLogo,

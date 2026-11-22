@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// 本产品独立拥有资源需求、工程准备与编译；公开回执仅提供验真资源，不提供执行命令。
+// 准备途遇官网资源，执行Web前端构建和产物核验。
+// 提供Sites预览包装，并管理本产品工作目录及构建进程。
+
 import {spawn,spawnSync} from 'node:child_process';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {rmSync,rmdirSync,chmodSync,closeSync,openSync,readlinkSync,unlinkSync,copyFileSync,existsSync,lstatSync,mkdirSync,readFileSync,readdirSync,realpathSync,symlinkSync,writeFileSync} from 'node:fs';

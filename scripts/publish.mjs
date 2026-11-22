@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 本产品 Publish 只读验真正式 GitHub Release；不执行上传、部署、商店交易或编译。
+// 读取GitHub正式发布记录，核验途遇官网发布包的版本、清单及摘要。
+
 import {createHash} from 'node:crypto';
 import {createReadStream,existsSync,lstatSync,readFileSync,readdirSync,realpathSync} from 'node:fs';
 import {basename,isAbsolute,join,resolve} from 'node:path';

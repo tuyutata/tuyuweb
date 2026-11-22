@@ -1,3 +1,5 @@
+// 验证静态资源响应、页面路由回退、内嵌首页与安全响应头。
+
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";

@@ -1,3 +1,5 @@
+/* 定义途遇官网的字体、页面布局、卡片和导航样式，适配移动与桌面视口。 */
+
 @font-face {
   font-family: "Noto Sans SC";
   font-style: normal;

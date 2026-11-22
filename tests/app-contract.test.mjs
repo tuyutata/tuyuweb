@@ -1,3 +1,5 @@
+// 核对官网品牌文案、下载入口和页面引用的第一方视觉资源。
+
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';

@@ -1,3 +1,5 @@
+// 为官网静态资源附加安全响应头，并处理HTML页面路由的首页回退。
+
 const securityHeaders = {
   "Content-Security-Policy": "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self'; upgrade-insecure-requests",
   "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
